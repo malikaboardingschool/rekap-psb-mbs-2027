@@ -86,6 +86,9 @@
   .card h2 { margin: 0 0 2px; font-size: 15px; font-weight: 650; }
   .card .sub { margin: 0 0 14px; font-size: 13px; color: var(--text-3); }
 
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 12px; }
+  .card-head .seg { background: var(--surface-2); margin-bottom: 12px; }
+  .card-head .seg button { padding: 4px 10px; font-size: 12.5px; }
   .kpis { display: grid; grid-template-columns: 1.25fr repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
   .kpi .lbl { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); font-weight: 550; }
   .kpi .val { font-size: 38px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: 6px; }
@@ -220,8 +223,16 @@
       <div class="hbars" id="status"></div>
     </section>
     <section class="card">
-      <h2>Asal kabupaten / kota</h2>
-      <p class="sub">Top 10</p>
+      <div class="card-head">
+        <div>
+          <h2 id="asalTitle">Asal kabupaten / kota</h2>
+          <p class="sub">Top 10</p>
+        </div>
+        <div class="seg" role="group" aria-label="Lihat asal berdasarkan">
+          <button type="button" data-asal="kota" aria-pressed="true">Kota / Kabupaten</button>
+          <button type="button" data-asal="kec" aria-pressed="false">Kecamatan</button>
+        </div>
+      </div>
       <div class="hbars" id="kota"></div>
     </section>
   </div>
@@ -243,8 +254,22 @@
       <summary><span class="buka">Tampilkan daftar</span><span class="tutup">Sembunyikan daftar</span></summary>
       <div class="tbl-scroll">
         <table class="ganda">
-          <thead><tr><th>Nomor registrasi</th><th>Kategori</th><th>Muncul</th><th>Waktu pendaftaran</th><th>Keterangan</th></tr></thead>
+          <thead><tr><th>Nomor registrasi</th><th>Nama</th><th>Kategori</th><th>Muncul</th><th>Waktu pendaftaran</th><th>Keterangan</th></tr></thead>
           <tbody id="gandaBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Nama ganda</h2>
+    <p class="sub" id="namaSub"></p>
+    <details class="lipat" id="namaWrap" hidden>
+      <summary><span class="buka">Tampilkan daftar</span><span class="tutup">Sembunyikan daftar</span></summary>
+      <div class="tbl-scroll">
+        <table class="ganda">
+          <thead><tr><th>Nama</th><th>Muncul</th><th>Nomor registrasi</th><th>Kategori</th><th>Waktu pendaftaran</th><th>Keterangan</th></tr></thead>
+          <tbody id="namaBody"></tbody>
         </table>
       </div>
     </details>
@@ -270,15 +295,27 @@ var CONFIG = {
   GID_KUOTA: "69441648",   // tab "Pengaturan Kuota" (BUKA/TUTUP); kosongkan bila tidak dipakai
   REFRESH_DETIK: 30,       // jeda pembaruan otomatis
   JUDUL: "Rekap Pendaftar Santri Baru Malika Islamic Boarding School TA 2027/2028",
-  SUBJUDUL: "Data langsung dari formulir pendaftaran",
-  // Hanya kolom ini yang diambil dari spreadsheet (tanpa nama, NIK, alamat, atau nomor telepon):
-  // A = Waktu Pendaftaran, B = Nomor Registrasi, C = Status Verifikasi,
-  // D = Jenjang, F = Jenis Kelamin, J = Tanggal Lahir, R = Kecamatan, S = Kabupaten / Kota
-  // (kecamatan tidak ditampilkan; hanya dipakai untuk memilah Kota Tangerang dan Kabupaten Tangerang)
-  // (tanggal lahir tidak ditampilkan; hanya dipakai untuk membedakan kiriman ulang dari nomor yang bentrok)
-  KOLOM: "A,B,C,D,F,J,R,S"
+  SUBJUDUL: "Data langsung dari formulir pendaftaran"
+  // Kolom dicari berdasarkan JUDUL-nya di baris pertama tiap tab (lihat KOLOM di bawah), bukan hurufnya,
+  // jadi menyisipkan atau memindahkan kolom di spreadsheet tidak merusak dashboard. Yang diambil hanya:
+  // Waktu Pendaftaran, Nomor Registrasi, Status Verifikasi, Jenjang, Nama Lengkap, Jenis Kelamin,
+  // Tanggal Lahir, Kecamatan, dan Kabupaten / Kota.
 };
 /* ================================================== */
+
+// Urutan di sini menentukan urutan kolom hasil kueri; "re" dicocokkan dengan judul kolom (huruf kecil).
+var KOLOM = [
+  { nama: "Waktu Pendaftaran", re: /^waktu|timestamp/ },
+  { nama: "Nomor Registrasi", re: /registrasi/ },
+  { nama: "Status Verifikasi", re: /^status/ },
+  { nama: "Jenjang", re: /^jenjang/ },
+  { nama: "Nama Lengkap", re: /^nama( lengkap| santri)?$/ },
+  { nama: "Jenis Kelamin", re: /kelamin/ },
+  { nama: "Tanggal Lahir", re: /^tanggal lahir|^tgl lahir/ },
+  { nama: "Kecamatan", re: /^kecamatan/ },
+  { nama: "Kabupaten / Kota", re: /^(kabupaten|kota)/ }
+];
+var hurufKolom = {}; // gid -> "A,B,…" hasil pencarian judul; dicari ulang bila susunan kolom berubah
 
 var KATEGORI = [
   { key: "SMP|L", label: "SMP Putra", color: "var(--s1)" },
@@ -286,7 +323,7 @@ var KATEGORI = [
   { key: "SMA|L", label: "SMA Putra", color: "var(--s3)" },
   { key: "SMA|P", label: "SMA Putri", color: "var(--s4)" }
 ];
-var state = { rows: [], kuota: {}, range: "all", status: "", dedupe: false, updated: null };
+var state = { rows: [], kuota: {}, range: "all", status: "", dedupe: false, asal: "kota", updated: null };
 var $ = function (id) { return document.getElementById(id); };
 var nf = new Intl.NumberFormat("id-ID");
 var BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -340,7 +377,36 @@ var KEC_TANGERANG = {
   "Tangerang Selatan": "ciputat ciputattimur pamulang pondokaren serpong serpongutara setu".split(" ")
 };
 // Salah ketik nama kecamatan: "salah": "benar" (huruf kecil tanpa spasi). Tambahkan di sini bila ada yang lain.
-var EJAAN_KEC = { "baruceper": "batuceper", "priuk": "periuk", "sepetan": "sepatan", "cipmdoh": "cipondoh", "karangtimur": "karangtengah" };
+var EJAAN_KEC = {
+  "baruceper": "batuceper", "priuk": "periuk", "sepetan": "sepatan", "cipmdoh": "cipondoh", "karangtimur": "karangtengah",
+  "cibodasbaru": "cibodas", "cipondohindah": "cipondoh", "curugkulon": "curug"
+};
+/* Kecamatan untuk grafik asal: "key" tanpa spasi agar "Pasar Kemis" dan "Pasarkemis" terhitung sama,
+   "nama" adalah tulisan rapi untuk ditampilkan (kosong bila berasal dari perbaikan salah ketik). */
+function normKec(s) {
+  if (/@/.test(s)) return { key: "", nama: "" };
+  var sp = s.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\b(kecamatan|kec|kota|kabupaten|kab)\b/g, " ").replace(/\s+/g, " ").trim();
+  var key = sp.replace(/ /g, "");
+  if (!key) return { key: "", nama: "" };
+  if (Object.prototype.hasOwnProperty.call(EJAAN_KEC, key)) return { key: EJAAN_KEC[key], nama: "" };
+  return { key: key, nama: judul(sp) };
+}
+function judul(s) { return s.replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); }); }
+function hitungKec(rows) {
+  var m = {}, nm = {};
+  rows.forEach(function (r) {
+    m[r.kec] = (m[r.kec] || 0) + 1;
+    if (r.kecNama) { nm[r.kec] = nm[r.kec] || {}; nm[r.kec][r.kecNama] = (nm[r.kec][r.kecNama] || 0) + 1; }
+  });
+  return Object.keys(m).map(function (k) {
+    var label = "Tidak diisi / tidak jelas";
+    if (k) { // pakai tulisan yang paling sering dipakai pendaftar
+      var c = nm[k] || {}, best = Object.keys(c).sort(function (a, b) { return c[b] - c[a]; })[0];
+      label = best || judul(k);
+    }
+    return [label, m[k]];
+  }).sort(function (a, b) { return b[1] - a[1]; });
+}
 function pilahTangerang(kota, kotaAsli, kec) {
   if (kota !== "Tangerang") return kota;
   var k = kec.toLowerCase().replace(/\b(kecamatan|kec|kota|kabupaten|kab)\b/g, "").replace(/[^a-z]/g, "");
@@ -373,25 +439,39 @@ function kueri(gid, tq) {
     return j.table;
   });
 }
-function ambilTab(tab) {
-  return kueri(tab.gid, "select " + CONFIG.KOLOM).then(function (table) {
-    var cols = table.cols.map(function (c) { return (c.label || "").toLowerCase(); });
-    function idx(re, fallback) {
-      for (var i = 0; i < cols.length; i++) if (re.test(cols[i])) return i;
-      return fallback;
+function cariKolom(tab) {
+  if (hurufKolom[tab.gid]) return Promise.resolve(hurufKolom[tab.gid]);
+  return kueri(tab.gid, "select * limit 0").then(function (table) {
+    var huruf = KOLOM.map(function (k) {
+      for (var i = 0; i < table.cols.length; i++) if (k.re.test((table.cols[i].label || "").trim().toLowerCase())) return table.cols[i].id;
+      throw new Error("Kolom “" + k.nama + "” tidak ditemukan di salah satu tab. Periksa judul kolom di baris pertama");
+    }).join(",");
+    return (hurufKolom[tab.gid] = huruf);
+  });
+}
+function ambilTab(tab, ulang) {
+  return cariKolom(tab).then(function (huruf) { return kueri(tab.gid, "select " + huruf); }).then(function (table) {
+    // pastikan kolom yang datang memang yang diminta; bila susunan kolom baru saja diubah, cari ulang sekali
+    var cocok = table.cols.length === KOLOM.length && KOLOM.every(function (k, i) {
+      return k.re.test((table.cols[i].label || "").trim().toLowerCase());
+    });
+    if (!cocok) {
+      delete hurufKolom[tab.gid];
+      if (ulang) throw new Error("Susunan kolom spreadsheet berubah dan tidak dapat dikenali");
+      return ambilTab(tab, true);
     }
-    var iW = idx(/waktu|timestamp|tanggal daftar/, 0), iR = idx(/registrasi/, 1), iS = idx(/status/, 2),
-        iJ = idx(/jenjang/, 3), iK = idx(/kelamin/, 4), iL = idx(/lahir/, 5), iKec = idx(/kecamatan/, 6), iC = idx(/kabupaten|kota/, 7);
+    var iW = 0, iR = 1, iS = 2, iJ = 3, iN = 4, iK = 5, iL = 6, iKec = 7, iC = 8;
     var rows = [];
     table.rows.forEach(function (r) {
       var c = r.c || [];
       var jenjangAsli = teks(c[iJ]), jkAsli = teks(c[iK]);
       if (!jenjangAsli && !jkAsli && !teks(c[iR])) return; // baris kosong
-      var jenjang = normJenjang(jenjangAsli), jk = normJK(jkAsli);
+      var jenjang = normJenjang(jenjangAsli), jk = normJK(jkAsli), kec = normKec(teks(c[iKec]));
       rows.push({
         t: parseWaktu(c[iW]), reg: teks(c[iR]), status: teks(c[iS]) || "Tanpa status",
         kat: tab.kat, // kategori mengikuti tab tempat baris itu berada
         isi: jenjang && jk ? jenjang + "|" + jk : "", // kategori menurut isian formulir, untuk mendeteksi salah tab
+        nama: teks(c[iN]).replace(/\s+/g, " "), kec: kec.key, kecNama: kec.nama,
         lahir: teks(c[iL]), kota: pilahTangerang(normKota(teks(c[iC])), teks(c[iC]), teks(c[iKec]))
       });
     });
@@ -410,7 +490,7 @@ function ambilKuota() {
   }).catch(function () { return {}; }); // kuota hanya pelengkap; jangan gagalkan rekap
 }
 function ambilData() {
-  return Promise.all([Promise.all(CONFIG.TABS.map(ambilTab)), ambilKuota()]).then(function (h) {
+  return Promise.all([Promise.all(CONFIG.TABS.map(function (t) { return ambilTab(t); })), ambilKuota()]).then(function (h) {
     state.kuota = h[1];
     return [].concat.apply([], h[0]);
   });
@@ -466,7 +546,8 @@ function render() {
 
   renderTren(rows);
   renderHBars("status", hitungPer(rows, "status"), 12);
-  renderHBars("kota", hitungPer(rows, "kota"), 10, true);
+  $("asalTitle").textContent = state.asal === "kec" ? "Asal kecamatan" : "Asal kabupaten / kota";
+  renderHBars("kota", state.asal === "kec" ? hitungKec(rows) : hitungPer(rows, "kota"), 10, true, state.asal);
 
   // Tabel
   var tb = "", tL = 0, tP = 0;
@@ -501,9 +582,9 @@ function renderGanda() {
   });
   var daftar = urut.filter(function (k) { return grup[k].length > 1; }).map(function (k) {
     var rs = grup[k].slice().sort(function (a, b) { return (a.t || 0) - (b.t || 0); });
-    var orang = {}, kat = {};
-    rs.forEach(function (r) { orang[r.lahir] = 1; kat[labelKat(r.kat)] = 1; });
-    return { reg: k, rs: rs, orang: Object.keys(orang).length, kat: Object.keys(kat) };
+    var orang = {}, kat = {}, nama = {};
+    rs.forEach(function (r) { orang[r.lahir] = 1; kat[labelKat(r.kat)] = 1; nama[kunciNama(r.nama) || r.nama] = r.nama; });
+    return { reg: k, rs: rs, orang: Object.keys(orang).length, kat: Object.keys(kat), nama: Object.keys(nama).map(function (n) { return nama[n]; }) };
   }).sort(function (a, b) { return b.orang - a.orang || b.rs.length - a.rs.length || (a.reg < b.reg ? -1 : 1); });
 
   var ulang = 0, bentrok = 0;
@@ -517,10 +598,44 @@ function renderGanda() {
     var ket = g.orang > 1
       ? '<span class="flag warn">▲ Dipakai ' + g.orang + " pendaftar berbeda</span>"
       : '<span class="flag">Pendaftar yang sama, terkirim ' + g.rs.length + " kali</span>";
-    return "<tr><td><b>" + esc(g.reg) + "</b></td><td>" + esc(g.kat.join(", ")) + '</td><td class="num">' + g.rs.length + "×</td><td>" +
+    return "<tr><td><b>" + esc(g.reg) + "</b></td><td>" + g.nama.map(esc).join("<br>") + "</td><td>" + esc(g.kat.join(", ")) + '</td><td class="num">' + g.rs.length + "×</td><td>" +
       g.rs.map(function (r) { return esc(waktu(r.t)); }).join("<br>") + "</td><td>" + ket + "</td></tr>";
   }).join("");
+  renderNamaGanda();
   return ulang;
+}
+
+/* Nama yang sama tetapi terdaftar dengan nomor registrasi berbeda (dari seluruh data, bukan hasil saringan).
+   Nama yang sama dengan nomor yang sama sudah tercantum di daftar nomor registrasi ganda. */
+function kunciNama(n) { return n.toUpperCase().replace(/[^A-Z]+/g, " ").trim(); }
+function renderNamaGanda() {
+  var grup = {}, urut = [];
+  state.rows.forEach(function (r) {
+    var k = kunciNama(r.nama);
+    if (!k) return;
+    if (!grup[k]) { grup[k] = []; urut.push(k); }
+    grup[k].push(r);
+  });
+  var daftar = urut.map(function (k) {
+    var rs = grup[k].slice().sort(function (a, b) { return (a.t || 0) - (b.t || 0); });
+    var reg = {}, lahir = {};
+    rs.forEach(function (r) { reg[r.reg] = 1; lahir[r.lahir] = 1; });
+    return { nama: rs[0].nama, rs: rs, reg: Object.keys(reg).length, lahir: Object.keys(lahir).length };
+  }).filter(function (g) { return g.reg > 1; })
+    .sort(function (a, b) { return a.lahir - b.lahir || b.rs.length - a.rs.length || (a.nama < b.nama ? -1 : 1); });
+
+  $("namaSub").textContent = daftar.length
+    ? nf.format(daftar.length) + " nama terdaftar dengan lebih dari satu nomor registrasi"
+    : "Tidak ada nama yang terdaftar dengan lebih dari satu nomor registrasi";
+  $("namaWrap").hidden = !daftar.length;
+  $("namaBody").innerHTML = daftar.map(function (g) {
+    var ket = g.lahir > 1
+      ? '<span class="flag">Tanggal lahir berbeda — kemungkinan orang berbeda yang bernama sama</span>'
+      : '<span class="flag warn">▲ Tanggal lahir sama — kemungkinan orang yang sama mendaftar ' + g.rs.length + " kali</span>";
+    function kol(f) { return g.rs.map(function (r) { return esc(f(r)); }).join("<br>"); }
+    return "<tr><td><b>" + esc(g.nama) + '</b></td><td class="num">' + g.rs.length + "×</td><td>" + kol(function (r) { return r.reg || "–"; }) +
+      "</td><td>" + kol(function (r) { return labelKat(r.kat); }) + "</td><td>" + kol(function (r) { return waktu(r.t); }) + "</td><td>" + ket + "</td></tr>";
+  }).join("");
 }
 function labelKat(key) {
   for (var i = 0; i < KATEGORI.length; i++) if (KATEGORI[i].key === key) return KATEGORI[i].label;
@@ -536,7 +651,8 @@ function hitungPer(rows, f) {
   return Object.keys(m).map(function (k) { return [k, m[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
 }
 var lainBuka = {}; // rincian "Lainnya" yang sedang dibuka, per kartu, agar tidak tertutup saat data diperbarui
-function renderHBars(id, data, maks, rinciLain) {
+function renderHBars(id, data, maks, rinciLain, mode) {
+  var kunci = id + "|" + (mode || "");
   var el = $(id);
   if (!data.length) { el.innerHTML = '<div class="empty">Belum ada data</div>'; return; }
   var lain = data.slice(maks);
@@ -551,12 +667,12 @@ function renderHBars(id, data, maks, rinciLain) {
   }
   var html = data.map(baris).join("");
   if (rinciLain && lain.length) {
-    html += '<details class="lipat"' + (lainBuka[id] ? " open" : "") + '><summary><span class="buka">Tampilkan rincian Lainnya (' + nf.format(lain.length) +
+    html += '<details class="lipat"' + (lainBuka[kunci] ? " open" : "") + '><summary><span class="buka">Tampilkan rincian Lainnya (' + nf.format(lain.length) +
       ')</span><span class="tutup">Sembunyikan rincian Lainnya</span></summary><div class="hbars">' + lain.map(baris).join("") + "</div></details>";
   }
   el.innerHTML = html;
   var det = el.querySelector("details");
-  if (det) det.addEventListener("toggle", function () { lainBuka[id] = det.open; });
+  if (det) det.addEventListener("toggle", function () { lainBuka[kunci] = det.open; });
 }
 
 function renderTren(rows) {
@@ -674,10 +790,17 @@ function jadwal() {
 document.addEventListener("visibilitychange", function () { if (!document.hidden) muat(); });
 
 /* ---------- Kendali ---------- */
-document.querySelectorAll(".seg button").forEach(function (b) {
+document.querySelectorAll(".seg button[data-range]").forEach(function (b) {
   b.addEventListener("click", function () {
     state.range = b.getAttribute("data-range");
-    document.querySelectorAll(".seg button").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    document.querySelectorAll(".seg button[data-range]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    render();
+  });
+});
+document.querySelectorAll(".seg button[data-asal]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    state.asal = b.getAttribute("data-asal");
+    document.querySelectorAll(".seg button[data-asal]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
     render();
   });
 });
