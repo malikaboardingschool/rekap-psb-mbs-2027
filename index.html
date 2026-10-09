@@ -202,12 +202,14 @@
   <section class="kpis" id="kpis" aria-label="Jumlah pendaftar"></section>
 
   <section class="card">
-    <h2 id="trendTitle">Pendaftar masuk</h2>
-    <p class="sub" id="trendSub"></p>
-    <div class="legend" id="legend"></div>
-    <div class="trend-scroll">
-      <div class="trend" id="trend"></div>
-      <div class="xaxis" id="xaxis"></div>
+    <h2>Tabel rekapitulasi</h2>
+    <p class="sub">Jenjang dan jenis kelamin, menurut tab di spreadsheet</p>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Jenjang</th><th>Putra</th><th>Putri</th><th>Jumlah</th></tr></thead>
+        <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
+      </table>
     </div>
   </section>
 
@@ -219,20 +221,18 @@
     </section>
     <section class="card">
       <h2>Asal kabupaten / kota</h2>
-      <p class="sub">Sepuluh terbanyak</p>
+      <p class="sub">Top 10</p>
       <div class="hbars" id="kota"></div>
     </section>
   </div>
 
   <section class="card" style="margin-top:12px">
-    <h2>Tabel rekapitulasi</h2>
-    <p class="sub">Jenjang dan jenis kelamin, menurut tab di spreadsheet</p>
-    <div class="tbl-scroll">
-      <table>
-        <thead><tr><th>Jenjang</th><th>Putra</th><th>Putri</th><th>Jumlah</th></tr></thead>
-        <tbody id="tbody"></tbody>
-        <tfoot id="tfoot"></tfoot>
-      </table>
+    <h2 id="trendTitle">Pendaftar masuk</h2>
+    <p class="sub" id="trendSub"></p>
+    <div class="legend" id="legend"></div>
+    <div class="trend-scroll">
+      <div class="trend" id="trend"></div>
+      <div class="xaxis" id="xaxis"></div>
     </div>
   </section>
 
@@ -273,9 +273,10 @@ var CONFIG = {
   SUBJUDUL: "Data langsung dari formulir pendaftaran",
   // Hanya kolom ini yang diambil dari spreadsheet (tanpa nama, NIK, alamat, atau nomor telepon):
   // A = Waktu Pendaftaran, B = Nomor Registrasi, C = Status Verifikasi,
-  // D = Jenjang, F = Jenis Kelamin, J = Tanggal Lahir, S = Kabupaten / Kota
+  // D = Jenjang, F = Jenis Kelamin, J = Tanggal Lahir, R = Kecamatan, S = Kabupaten / Kota
+  // (kecamatan tidak ditampilkan; hanya dipakai untuk memilah Kota Tangerang dan Kabupaten Tangerang)
   // (tanggal lahir tidak ditampilkan; hanya dipakai untuk membedakan kiriman ulang dari nomor yang bentrok)
-  KOLOM: "A,B,C,D,F,J,S"
+  KOLOM: "A,B,C,D,F,J,R,S"
 };
 /* ================================================== */
 
@@ -320,12 +321,42 @@ function normJK(s) {
   return "";
 }
 // Salah ketik yang disamakan (per kata, huruf kecil): "salah": "benar". Tambahkan di sini bila ada yang lain.
-var EJAAN_KOTA = { "tanggerang": "tangerang", "tamgerang": "tangerang" };
+// Isi "" berarti kata itu dibuang (mis. "kita", salah ketik dari "kota").
+var EJAAN_KOTA = { "tanggerang": "tangerang", "tamgerang": "tangerang", "tengerang": "tangerang", "tangsel": "tangerang selatan", "kita": "" };
 function normKota(s) {
-  s = s.toLowerCase().replace(/[.,]/g, " ").replace(/\b(kota|kabupaten|kab|adm|administrasi)\b/g, " ").replace(/\s+/g, " ").trim();
+  s = s.toLowerCase().replace(/[.,()]/g, " ").replace(/\b(kota|kabupaten|kab|adm|administrasi)\b/g, " ").replace(/\s+/g, " ").trim();
   if (!s || /^[-\d\s]+$/.test(s)) return "";
-  s = s.split(" ").map(function (w) { return EJAAN_KOTA[w] || w; }).join(" ");
+  s = s.split(" ").map(function (w) { return Object.prototype.hasOwnProperty.call(EJAAN_KOTA, w) ? EJAAN_KOTA[w] : w; }).join(" ").replace(/\s+/g, " ").trim();
+  if (!s) return "";
   return s.replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
+}
+
+/* "Tangerang" dipilah menjadi Kota Tangerang dan Kabupaten Tangerang menurut kecamatannya.
+   Nama kecamatan ditulis huruf kecil tanpa spasi. */
+var KEC_TANGERANG = {
+  "Kota Tangerang": "batuceper benda cibodas ciledug cipondoh jatiuwung karangtengah karawaci larangan neglasari periuk pinang tangerang".split(" "),
+  "Kabupaten Tangerang": ("balaraja cikupa cisauk cisoka curug gunungkaler jambe jayanti kelapadua kemiri kosambi kresek kronjo legok mauk mekarbaru " +
+    "pagedangan pakuhaji panongan pasarkemis rajeg sepatan sepatantimur sindangjaya solear sukadiri sukamulya teluknaga tigaraksa").split(" "),
+  "Tangerang Selatan": "ciputat ciputattimur pamulang pondokaren serpong serpongutara setu".split(" ")
+};
+// Salah ketik nama kecamatan: "salah": "benar" (huruf kecil tanpa spasi). Tambahkan di sini bila ada yang lain.
+var EJAAN_KEC = { "baruceper": "batuceper", "priuk": "periuk", "sepetan": "sepatan", "cipmdoh": "cipondoh", "karangtimur": "karangtengah" };
+function pilahTangerang(kota, kotaAsli, kec) {
+  if (kota !== "Tangerang") return kota;
+  var k = kec.toLowerCase().replace(/\b(kecamatan|kec|kota|kabupaten|kab)\b/g, "").replace(/[^a-z]/g, "");
+  if (Object.prototype.hasOwnProperty.call(EJAAN_KEC, k)) k = EJAAN_KEC[k];
+  var hasil = "", panjang = 0, w, i, n;
+  for (w in KEC_TANGERANG) for (i = 0; i < KEC_TANGERANG[w].length; i++) {
+    n = KEC_TANGERANG[w][i];
+    if (k === n) return w;
+    // mis. "Cibodas Baru" atau "Curug Kulon": ambil kecamatan terpanjang yang menjadi awalannya
+    if (k.indexOf(n) === 0 && n.length > panjang) { hasil = w; panjang = n.length; }
+  }
+  if (hasil) return hasil;
+  // kecamatan tidak dikenali: ikuti tulisan pendaftar bila ia menyebut "Kota" atau "Kabupaten"
+  if (/\bkab/i.test(kotaAsli)) return "Kabupaten Tangerang";
+  if (/\bkota\b/i.test(kotaAsli)) return "Kota Tangerang";
+  return "Tangerang (kecamatan tidak dikenali)";
 }
 
 function kueri(gid, tq) {
@@ -350,7 +381,7 @@ function ambilTab(tab) {
       return fallback;
     }
     var iW = idx(/waktu|timestamp|tanggal daftar/, 0), iR = idx(/registrasi/, 1), iS = idx(/status/, 2),
-        iJ = idx(/jenjang/, 3), iK = idx(/kelamin/, 4), iL = idx(/lahir/, 5), iC = idx(/kabupaten|kota/, 6);
+        iJ = idx(/jenjang/, 3), iK = idx(/kelamin/, 4), iL = idx(/lahir/, 5), iKec = idx(/kecamatan/, 6), iC = idx(/kabupaten|kota/, 7);
     var rows = [];
     table.rows.forEach(function (r) {
       var c = r.c || [];
@@ -361,7 +392,7 @@ function ambilTab(tab) {
         t: parseWaktu(c[iW]), reg: teks(c[iR]), status: teks(c[iS]) || "Tanpa status",
         kat: tab.kat, // kategori mengikuti tab tempat baris itu berada
         isi: jenjang && jk ? jenjang + "|" + jk : "", // kategori menurut isian formulir, untuk mendeteksi salah tab
-        lahir: teks(c[iL]), kota: normKota(teks(c[iC]))
+        lahir: teks(c[iL]), kota: pilahTangerang(normKota(teks(c[iC])), teks(c[iC]), teks(c[iKec]))
       });
     });
     return rows;
@@ -435,7 +466,7 @@ function render() {
 
   renderTren(rows);
   renderHBars("status", hitungPer(rows, "status"), 12);
-  renderHBars("kota", hitungPer(rows, "kota"), 10);
+  renderHBars("kota", hitungPer(rows, "kota"), 10, true);
 
   // Tabel
   var tb = "", tL = 0, tP = 0;
@@ -501,21 +532,31 @@ function waktu(d) {
 
 function hitungPer(rows, f) {
   var m = {};
-  rows.forEach(function (r) { var k = r[f] || "Tidak diisi"; m[k] = (m[k] || 0) + 1; });
+  rows.forEach(function (r) { var k = r[f] || "Tidak diisi / tidak jelas"; m[k] = (m[k] || 0) + 1; });
   return Object.keys(m).map(function (k) { return [k, m[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
 }
-function renderHBars(id, data, maks) {
+var lainBuka = {}; // rincian "Lainnya" yang sedang dibuka, per kartu, agar tidak tertutup saat data diperbarui
+function renderHBars(id, data, maks, rinciLain) {
   var el = $(id);
   if (!data.length) { el.innerHTML = '<div class="empty">Belum ada data</div>'; return; }
-  var sisa = data.slice(maks).reduce(function (s, d) { return s + d[1]; }, 0);
+  var lain = data.slice(maks);
+  var sisa = lain.reduce(function (s, d) { return s + d[1]; }, 0);
   data = data.slice(0, maks);
   if (sisa) data.push(["Lainnya", sisa]);
   var max = Math.max.apply(null, data.map(function (d) { return d[1]; }));
-  el.innerHTML = data.map(function (d) {
+  function baris(d) {
     return '<div class="hbar" tabindex="0" data-tip="' + esc(d[0] + "\n" + nf.format(d[1]) + " pendaftar") + '">' +
       '<span class="name">' + esc(d[0]) + '</span><span class="track"><i style="width:' + (d[1] / max * 100) + '%"></i></span>' +
       '<span class="v num">' + nf.format(d[1]) + "</span></div>";
-  }).join("");
+  }
+  var html = data.map(baris).join("");
+  if (rinciLain && lain.length) {
+    html += '<details class="lipat"' + (lainBuka[id] ? " open" : "") + '><summary><span class="buka">Tampilkan rincian Lainnya (' + nf.format(lain.length) +
+      ')</span><span class="tutup">Sembunyikan rincian Lainnya</span></summary><div class="hbars">' + lain.map(baris).join("") + "</div></details>";
+  }
+  el.innerHTML = html;
+  var det = el.querySelector("details");
+  if (det) det.addEventListener("toggle", function () { lainBuka[id] = det.open; });
 }
 
 function renderTren(rows) {
